@@ -6,7 +6,16 @@ import os
 import unicodedata
 from pypdf import PdfReader, PdfWriter
 from pathlib import Path
+from urllib.parse import unquote
 
+def normalize_for_match(s: str) -> str:
+    """Make a string comparable across file:// URLs and Windows paths."""
+    if not s:
+        return ""
+    s = unquote(s)
+    s = s.replace("\\", "/")
+    s = s.lower()
+    return s
 
 # Utility functions
 
@@ -53,21 +62,18 @@ def extract_bookmarks(xml_path, pdf_path_obj):
         return None, None
 
     # Automatic hash determination
-    pdf_filename = pdf_path_obj.name
-    match_key_search = re.search(r'-- ([0-9a-f]{32}) --', pdf_filename)
-    if not match_key_search:
-         print("Error: Could not extract the 32-character hash from the PDF filename.")
-         return None, None
-
-    unique_key = match_key_search.group(1)
+    pdf_match_a = normalize_for_match(pdf_path_obj.resolve().as_posix())
+    pdf_match_b = normalize_for_match(pdf_path_obj.resolve().as_uri())  # file:///C:/...
+    unique_key = pdf_path_obj.stem  # used only for temp filename now
 
     cpdf_bookmarks = []
-    page_regex = re.compile(r'#(\d+)') 
+    page_regex = re.compile(r'(?:#|page=)(\d+)')
 
     for bookmark in root.iter('bookmark'):
         href = bookmark.get('href')
 
-        if href and unique_key in href:
+        href_norm = normalize_for_match(href)
+        if href_norm and (pdf_match_a in href_norm or pdf_match_b in href_norm):        
             title_tag = bookmark.find('title')
  
             if title_tag is None:
@@ -200,12 +206,7 @@ def main():
         sys.exit(1)
 
     # File location using GLOB
-    pdf_path_obj = find_pdf_by_hash(temp_pdf_path_obj.parent, unique_key)
-
-    if pdf_path_obj is None:
-        print(f"ERROR: File exists, but could not be located by hash search in directory {temp_pdf_path_obj.parent}")
-        print("Please manually rename the PDF to use only standard ASCII characters (e.g., replace non-standard quotes with standard ones) and try again.")
-        sys.exit(1)
+    pdf_path_obj = temp_pdf_path_obj
 
     pdf_path_str = pdf_path_obj.as_posix()
 
